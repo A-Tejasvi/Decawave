@@ -16,6 +16,10 @@ CFLAGS=-Os -DF_CPU=16000000UL -mmcu=atmega328p -Iinclude
 # # 	${CC} ${CFLAGS} -o test.elf test.o libdw1000.o libdw1000Spi.o
 SRCDIR=src
 OBJDIR=obj
+
+SPIDIR=SPI
+ARDUINO=arduino
+
 INCDIR=include
 objects = $(addprefix $(OBJDIR)/, libdw1000.o libdw1000Spi.o)
 
