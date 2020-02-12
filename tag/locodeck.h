@@ -36,15 +36,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "FreeRTOS.h"
-
 #include "libdw1000.h"
 #include "stabilizer_types.h"
 
 // Timestamp counter frequency
 #define LOCODECK_TS_FREQ (499.2e6 * 128)
 
-
+//**********Important*********
 typedef enum uwbEvent_e {
   eventTimeout,
   eventPacketReceived,
@@ -55,15 +53,14 @@ typedef enum uwbEvent_e {
 
 typedef uint64_t locoAddress_t;
 
-#define LPS_NUMBER_OF_ALGORITHMS 3
+#define LPS_NUMBER_OF_ALGORITHMS 1
 
-#define LPS_AUTO_MODE_SWITCH_PERIOD M2T(1000)
 
 typedef enum {
   lpsMode_auto = 0,
-  lpsMode_TWR = 1,
-  lpsMode_TDoA2 = 2,
-  lpsMode_TDoA3 = 3,
+  // lpsMode_TWR = 1,
+  // lpsMode_TDoA2 = 2,
+  lpsMode_TDoA3 = 1,
 } lpsMode_t;
 
 typedef struct {
@@ -95,9 +92,8 @@ typedef struct uwbAlgorithm_s {
   uint8_t (*getActiveAnchorIdList)(uint8_t unorderedAnchorList[], const int maxListSize);
 } uwbAlgorithm_t;
 
-#include <FreeRTOS.h>
 
-#define MAX_TIMEOUT portMAX_DELAY
+#define MAX_TIMEOUT 43
 
 // Send a short configuration packet to the LPS system
 // Returns true if packet will be send, false instead
@@ -128,5 +124,11 @@ struct lppShortAnchorPos_s {
   float y;
   float z;
 } __attribute__((packed));
+
+/**************************************/
+/************ Added By Kedar **********/
+/**************************************/
+
+void dwm1000Init()
 
 #endif // __LOCODECK_H__

@@ -44,22 +44,16 @@ The implementation must handle
 
 #include <string.h>
 
-#include "FreeRTOS.h"
-#include "task.h"
 
 #include "lpsTdoa3Tag.h"
 #include "tdoaEngine.h"
 #include "tdoaStats.h"
-#include "estimator.h"
+#include "misc.h"
 
 #include "libdw1000.h"
-#include "mac.h"
+#include "Arduino.h"
 
 #define DEBUG_MODULE "TDOA3"
-#include "debug.h"
-#include "cfassert.h"
-#include "log.h"
-#include "param.h"
 
 // Positions for sent LPP packets
 #define LPS_TDOA3_TYPE 0
@@ -169,7 +163,7 @@ static void handleLppPacket(const int dataLength, int rangePacketLength, const p
 
 static void rxcallback(dwDevice_t *dev) {
   tdoaStats_t* stats = &engineState.stats;
-  STATS_CNT_RATE_EVENT(&stats->packetsReceived);
+  // STATS_CNT_RATE_EVENT(&stats->packetsReceived);
 
   int dataLength = dwGetDataLength(dev);
   packet_t rxPacket;
@@ -187,7 +181,7 @@ static void rxcallback(dwDevice_t *dev) {
     const uint8_t seqNr = packet->header.seq;
 
     tdoaAnchorContext_t anchorCtx;
-    uint32_t now_ms = T2M(xTaskGetTickCount());
+    uint32_t now_ms = millis();
 
     tdoaEngineGetAnchorCtxForPacketProcessing(&engineState, anchorId, now_ms, &anchorCtx);
     int rangeDataLength = updateRemoteData(&anchorCtx, packet);
@@ -205,36 +199,36 @@ static void setRadioInReceiveMode(dwDevice_t *dev) {
   dwStartReceive(dev);
 }
 
-static void sendLppShort(dwDevice_t *dev, lpsLppShortPacket_t *packet)
-{
-  static packet_t txPacket;
-  dwIdle(dev);
+// static void sendLppShort(dwDevice_t *dev, lpsLppShortPacket_t *packet)
+// {
+//   static packet_t txPacket;
+//   dwIdle(dev);
 
-  MAC80215_PACKET_INIT(txPacket, MAC802154_TYPE_DATA);
+//   MAC80215_PACKET_INIT(txPacket, MAC802154_TYPE_DATA);
 
-  txPacket.payload[LPS_TDOA3_TYPE] = LPP_HEADER_SHORT_PACKET;
-  memcpy(&txPacket.payload[LPS_TDOA3_SEND_LPP_PAYLOAD], packet->data, packet->length);
+//   txPacket.payload[LPS_TDOA3_TYPE] = LPP_HEADER_SHORT_PACKET;
+//   memcpy(&txPacket.payload[LPS_TDOA3_SEND_LPP_PAYLOAD], packet->data, packet->length);
 
-  txPacket.pan = 0xbccf;
-  txPacket.sourceAddress = 0xbccf000000000000 | 0xff;
-  txPacket.destAddress = 0xbccf000000000000 | packet->dest;
+//   txPacket.pan = 0xbccf;
+//   txPacket.sourceAddress = 0xbccf000000000000 | 0xff;
+//   txPacket.destAddress = 0xbccf000000000000 | packet->dest;
 
-  dwNewTransmit(dev);
-  dwSetDefaults(dev);
-  dwSetData(dev, (uint8_t*)&txPacket, MAC802154_HEADER_LENGTH+1+packet->length);
+//   dwNewTransmit(dev);
+//   dwSetDefaults(dev);
+//   dwSetData(dev, (uint8_t*)&txPacket, MAC802154_HEADER_LENGTH+1+packet->length);
 
-  dwStartTransmit(dev);
-}
+//   dwStartTransmit(dev);
+// }
 
-static bool sendLpp(dwDevice_t *dev) {
-  bool lppPacketToSend = lpsGetLppShort(&lppPacket);
-  if (lppPacketToSend) {
-    sendLppShort(dev, &lppPacket);
-    return true;
-  }
+// static bool sendLpp(dwDevice_t *dev) {
+//   bool lppPacketToSend = lpsGetLppShort(&lppPacket);
+//   if (lppPacketToSend) {
+//     sendLppShort(dev, &lppPacket);
+//     return true;
+//   }
 
-  return false;
-}
+//   return false;
+// }
 
 static uint32_t onEvent(dwDevice_t *dev, uwbEvent_t event) {
   switch(event) {
@@ -248,33 +242,34 @@ static uint32_t onEvent(dwDevice_t *dev, uwbEvent_t event) {
     case eventPacketSent:
       // Service packet sent, the radio is back to receive automatically
       break;
-    default:
-      ASSERT_FAILED();
+    // default:
+    //   ASSERT_FAILED();
   }
+  // -------------- Try permanent receive !!??? --------------
 
-  if(!sendLpp(dev)) {
+  // if(!sendLpp(dev)) {
     setRadioInReceiveMode(dev);
-  }
+  // }
 
-  uint32_t now_ms = T2M(xTaskGetTickCount());
-  tdoaStatsUpdate(&engineState.stats, now_ms);
+  // uint32_t now_ms = T2M(xTaskGetTickCount());
+  // tdoaStatsUpdate(&engineState.stats, now_ms);
 
   return MAX_TIMEOUT;
 }
 
-static void sendTdoaToEstimatorCallback(tdoaMeasurement_t* tdoaMeasurement) {
-  estimatorEnqueueTDOA(tdoaMeasurement);
+// static void sendTdoaToEstimatorCallback(tdoaMeasurement_t* tdoaMeasurement) {
+//   estimatorEnqueueTDOA(tdoaMeasurement);
 
-  #ifdef LPS_2D_POSITION_HEIGHT
-  // If LPS_2D_POSITION_HEIGHT is defined we assume that we are doing 2D positioning.
-  // LPS_2D_POSITION_HEIGHT contains the height (Z) that the tag will be located at
-  heightMeasurement_t heightData;
-  heightData.timestamp = xTaskGetTickCount();
-  heightData.height = LPS_2D_POSITION_HEIGHT;
-  heightData.stdDev = 0.0001;
-  estimatorEnqueueAbsoluteHeight(&heightData);
-  #endif
-}
+//   #ifdef LPS_2D_POSITION_HEIGHT
+//   // If LPS_2D_POSITION_HEIGHT is defined we assume that we are doing 2D positioning.
+//   // LPS_2D_POSITION_HEIGHT contains the height (Z) that the tag will be located at
+//   heightMeasurement_t heightData;
+//   heightData.timestamp = xTaskGetTickCount();
+//   heightData.height = LPS_2D_POSITION_HEIGHT;
+//   heightData.stdDev = 0.0001;
+//   estimatorEnqueueAbsoluteHeight(&heightData);
+//   #endif
+// }
 
 static bool getAnchorPosition(const uint8_t anchorId, point_t* position) {
   tdoaAnchorContext_t anchorCtx;
@@ -301,7 +296,7 @@ static uint8_t getActiveAnchorIdList(uint8_t unorderedAnchorList[], const int ma
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 static void Initialize(dwDevice_t *dev) {
-  uint32_t now_ms = T2M(xTaskGetTickCount());
+  uint32_t now_ms = millis();
   tdoaEngineInit(&engineState, now_ms, sendTdoaToEstimatorCallback, LOCODECK_TS_FREQ);
 
   #ifdef LPS_2D_POSITION_HEIGHT
@@ -331,21 +326,21 @@ uwbAlgorithm_t uwbTdoa3TagAlgorithm = {
 };
 
 
-LOG_GROUP_START(tdoa3)
-STATS_CNT_RATE_LOG_ADD(stRx, &engineState.stats.packetsReceived)
-STATS_CNT_RATE_LOG_ADD(stEst, &engineState.stats.packetsToEstimator)
-STATS_CNT_RATE_LOG_ADD(stTime, &engineState.stats.timeIsGood)
-STATS_CNT_RATE_LOG_ADD(stFound, &engineState.stats.suitableDataFound)
-STATS_CNT_RATE_LOG_ADD(stCc, &engineState.stats.clockCorrection)
-STATS_CNT_RATE_LOG_ADD(stHit, &engineState.stats.contextHitCount)
-STATS_CNT_RATE_LOG_ADD(stMiss, &engineState.stats.contextMissCount)
+// LOG_GROUP_START(tdoa3)
+// STATS_CNT_RATE_LOG_ADD(stRx, &engineState.stats.packetsReceived)
+// STATS_CNT_RATE_LOG_ADD(stEst, &engineState.stats.packetsToEstimator)
+// STATS_CNT_RATE_LOG_ADD(stTime, &engineState.stats.timeIsGood)
+// STATS_CNT_RATE_LOG_ADD(stFound, &engineState.stats.suitableDataFound)
+// STATS_CNT_RATE_LOG_ADD(stCc, &engineState.stats.clockCorrection)
+// STATS_CNT_RATE_LOG_ADD(stHit, &engineState.stats.contextHitCount)
+// STATS_CNT_RATE_LOG_ADD(stMiss, &engineState.stats.contextMissCount)
 
-LOG_ADD(LOG_FLOAT, cc, &engineState.stats.clockCorrection)
-LOG_ADD(LOG_UINT16, tof, &engineState.stats.tof)
-LOG_ADD(LOG_FLOAT, tdoa, &engineState.stats.tdoa)
-LOG_GROUP_STOP(tdoa3)
+// LOG_ADD(LOG_FLOAT, cc, &engineState.stats.clockCorrection)
+// LOG_ADD(LOG_UINT16, tof, &engineState.stats.tof)
+// LOG_ADD(LOG_FLOAT, tdoa, &engineState.stats.tdoa)
+// LOG_GROUP_STOP(tdoa3)
 
-PARAM_GROUP_START(tdoa3)
-PARAM_ADD(PARAM_UINT8, logId, &engineState.stats.newAnchorId)
-PARAM_ADD(PARAM_UINT8, logOthrId, &engineState.stats.newRemoteAnchorId)
-PARAM_GROUP_STOP(tdoa3)
+// PARAM_GROUP_START(tdoa3)
+// PARAM_ADD(PARAM_UINT8, logId, &engineState.stats.newAnchorId)
+// PARAM_ADD(PARAM_UINT8, logOthrId, &engineState.stats.newRemoteAnchorId)
+// PARAM_GROUP_STOP(tdoa3)

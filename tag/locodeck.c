@@ -37,49 +37,19 @@
 
 /*******Added by Kedar*******/
 #include "Arduino.h"
-#include "SPI.h"
+#include <SPI.h>
 /****************************/
 
-#include "deck.h"
-#include "system.h"
-#include "debug.h"
-#include "log.h"
-#include "param.h"
-#include "nvicconf.h"
-#include "estimator.h"
-
 #include "locodeck.h"
-
-#include "lpsTdoa2Tag.h"
 #include "lpsTdoa3Tag.h"
-#include "lpsTwrTag.h"
-
-
-#define CS_PIN DECK_GPIO_IO1
 
 // LOCO deck alternative IRQ and RESET pins(IO_2, IO_3) instead of default (RX1, TX1), leaving UART1 free for use
-#ifdef LOCODECK_USE_ALT_PINS
-  #define GPIO_PIN_IRQ 	GPIO_Pin_5
-	#define GPIO_PIN_RESET 	GPIO_Pin_4
-	#define GPIO_PORT		GPIOB
-	#define EXTI_PortSource EXTI_PortSourceGPIOB
-	#define EXTI_PinSource 	EXTI_PinSource5
-	#define EXTI_LineN 		EXTI_Line5
-	#define EXTI_IRQChannel EXTI9_5_IRQn
-#else
-  #define GPIO_PIN_IRQ 	GPIO_Pin_11
-	#define GPIO_PIN_RESET 	GPIO_Pin_10
-	#define GPIO_PORT		GPIOC
-	#define EXTI_PortSource EXTI_PortSourceGPIOC
-	#define EXTI_PinSource 	EXTI_PinSource11
-	#define EXTI_LineN 		EXTI_Line11
-	#define EXTI_IRQChannel EXTI15_10_IRQn
-#endif
+#define GPIO_PIN_IRQ 	  9
+#define GPIO_PIN_RESET 	2
+#define CS_PIN          SS
 
 
 #define DEFAULT_RX_TIMEOUT 10000
-
-
 #define ANTENNA_OFFSET 154.6   // In meter
 
 // The anchor position can be set using parameters
@@ -109,26 +79,24 @@ struct {
   uwbAlgorithm_t *algorithm;
   char *name;
 } algorithmsList[LPS_NUMBER_OF_ALGORITHMS + 1] = {
-  [lpsMode_TWR] = {.algorithm = &uwbTwrTagAlgorithm, .name="TWR"},
-  [lpsMode_TDoA2] = {.algorithm = &uwbTdoa2TagAlgorithm, .name="TDoA2"},
+  // [lpsMode_TWR] = {.algorithm = &uwbTwrTagAlgorithm, .name="TWR"},
+  // [lpsMode_TDoA2] = {.algorithm = &uwbTdoa2TagAlgorithm, .name="TDoA2"},
   [lpsMode_TDoA3] = {.algorithm = &uwbTdoa3TagAlgorithm, .name="TDoA3"},
 };
 
-#if LPS_TDOA_ENABLE
-static uwbAlgorithm_t *algorithm = &uwbTdoa2TagAlgorithm;
-#elif LPS_TDOA3_ENABLE
+// #if LPS_TDOA_ENABLE
+// static uwbAlgorithm_t *algorithm = &uwbTdoa2TagAlgorithm;
+// #elif LPS_TDOA3_ENABLE
 static uwbAlgorithm_t *algorithm = &uwbTdoa3TagAlgorithm;
-#else
-static uwbAlgorithm_t *algorithm = &uwbTwrTagAlgorithm;
-#endif
+// #else
+// static uwbAlgorithm_t *algorithm = &uwbTwrTagAlgorithm;
+// #endif
 
 static bool isInit = false;
-static SemaphoreHandle_t irqSemaphore;
-static SemaphoreHandle_t algoSemaphore;
+
 static dwDevice_t dwm_device;
 static dwDevice_t *dwm = &dwm_device;
 
-static QueueHandle_t lppShortQueue;
 
 static uint32_t timeout;
 
@@ -154,10 +122,7 @@ bool locoDeckGetAnchorPosition(const uint8_t anchorId, point_t* position)
   if (!isInit) {
     return false;
   }
-
-  xSemaphoreTake(algoSemaphore, portMAX_DELAY);
   bool result = algorithm->getAnchorPosition(anchorId, position);
-  xSemaphoreGive(algoSemaphore);
   return result;
 }
 
@@ -168,10 +133,7 @@ uint8_t locoDeckGetAnchorIdList(uint8_t unorderedAnchorList[], const int maxList
   if (!isInit) {
     return 0;
   }
-
-  xSemaphoreTake(algoSemaphore, portMAX_DELAY);
   uint8_t result = algorithm->getAnchorIdList(unorderedAnchorList, maxListSize);
-  xSemaphoreGive(algoSemaphore);
   return result;
 }
 
@@ -182,10 +144,7 @@ uint8_t locoDeckGetActiveAnchorIdList(uint8_t unorderedAnchorList[], const int m
   if (!isInit) {
     return 0;
   }
-
-  xSemaphoreTake(algoSemaphore, portMAX_DELAY);
   uint8_t result = algorithm->getActiveAnchorIdList(unorderedAnchorList, maxListSize);
-  xSemaphoreGive(algoSemaphore);
   return result;
 }
 
@@ -206,111 +165,124 @@ static bool switchToMode(const lpsMode_t newMode) {
 }
 
 static void autoModeSearchTryMode(const lpsMode_t newMode, const uint32_t now) {
-  // Set up next time to check
-  algoOptions.nextSwitchTick = now + LPS_AUTO_MODE_SWITCH_PERIOD;
-  switchToMode(newMode);
+  // // Set up next time to check
+  // algoOptions.nextSwitchTick = now + LPS_AUTO_MODE_SWITCH_PERIOD;
+  // switchToMode(newMode);
 }
+
+
+/**************************************/
+/*******Remove xTaskGetTickCount*******/
+/**************************************/
 
 static lpsMode_t autoModeSearchGetNextMode() {
-  lpsMode_t newMode = algoOptions.currentRangingMode + 1;
-  if (newMode > LPS_NUMBER_OF_ALGORITHMS) {
-    newMode = lpsMode_TWR;
-  }
+  // lpsMode_t newMode = algoOptions.currentRangingMode + 1;
+  // if (newMode > LPS_NUMBER_OF_ALGORITHMS) {
+  //   newMode = lpsMode_TWR;
+  // }
 
-  return newMode;
+  return 1;
 }
 
-static void processAutoModeSwitching() {
-  uint32_t now = xTaskGetTickCount();
+// static void processAutoModeSwitching() {
+//   uint32_t now = xTaskGetTickCount();
 
-  if (algoOptions.modeAutoSearchActive) {
-    if (algoOptions.modeAutoSearchDoInitialize) {
-      autoModeSearchTryMode(lpsMode_TDoA2, now);
-      algoOptions.modeAutoSearchDoInitialize = false;
-    } else {
-      if (now > algoOptions.nextSwitchTick) {
-        if (algorithm->isRangingOk()) {
-          // We have found an algorithm, stop searching and lock to it.
-          algoOptions.modeAutoSearchActive = false;
-          DEBUG_PRINT("Automatic mode: detected %s\n", algorithmsList[algoOptions.currentRangingMode].name);
-        } else {
-          lpsMode_t newMode = autoModeSearchGetNextMode();
-          autoModeSearchTryMode(newMode, now);
-        }
-      }
-    }
-  }
-}
+//   if (algoOptions.modeAutoSearchActive) {
+//     if (algoOptions.modeAutoSearchDoInitialize) {
+//       autoModeSearchTryMode(lpsMode_TDoA2, now);
+//       algoOptions.modeAutoSearchDoInitialize = false;
+//     } else {
+//       if (now > algoOptions.nextSwitchTick) {
+//         if (algorithm->isRangingOk()) {
+//           // We have found an algorithm, stop searching and lock to it.
+//           algoOptions.modeAutoSearchActive = false;
+//           DEBUG_PRINT("Automatic mode: detected %s\n", algorithmsList[algoOptions.currentRangingMode].name);
+//         } else {
+//           lpsMode_t newMode = autoModeSearchGetNextMode();
+//           autoModeSearchTryMode(newMode, now);
+//         }
+//       }
+//     }
+//   }
+// }
+
+/**************************************/
+/**************************************/
+/**************************************/
 
 static void resetAutoSearchMode() {
   algoOptions.modeAutoSearchActive = true;
   algoOptions.modeAutoSearchDoInitialize = true;
 }
 
-static void handleModeSwitch() {
-  if (algoOptions.userRequestedMode == lpsMode_auto) {
-    processAutoModeSwitching();
-  } else {
-    resetAutoSearchMode();
-    if (algoOptions.userRequestedMode != algoOptions.currentRangingMode) {
-      if (switchToMode(algoOptions.userRequestedMode)) {
-        DEBUG_PRINT("Switching to mode %s\n", algorithmsList[algoOptions.currentRangingMode].name);
-      }
-    }
-  }
-}
+// static void handleModeSwitch() {
+//   if (algoOptions.userRequestedMode == lpsMode_auto) {
+//     processAutoModeSwitching();
+//   } else {
+//     resetAutoSearchMode();
+//     if (algoOptions.userRequestedMode != algoOptions.currentRangingMode) {
+//       if (switchToMode(algoOptions.userRequestedMode)) {
+//         DEBUG_PRINT("Switching to mode %s\n", algorithmsList[algoOptions.currentRangingMode].name);
+//       }
+//     }
+//   }
+// }
+
+/**************************************/
+/**************************************/
+/**************************************/
 
 static void uwbTask(void* parameters) {
-  lppShortQueue = xQueueCreate(10, sizeof(lpsLppShortPacket_t));
+  // lppShortQueue = xQueueCreate(10, sizeof(lpsLppShortPacket_t));
 
-  algoOptions.currentRangingMode = lpsMode_auto;
-
-  systemWaitStart();
+  algoOptions.currentRangingMode = lpsMode_TDoA3;
 
   while(1) {
-    xSemaphoreTake(algoSemaphore, portMAX_DELAY);
-    handleModeSwitch();
-    xSemaphoreGive(algoSemaphore);
-
-    if (xSemaphoreTake(irqSemaphore, timeout / portTICK_PERIOD_MS)) {
-      do{
-        xSemaphoreTake(algoSemaphore, portMAX_DELAY);
-        dwHandleInterrupt(dwm);
-        xSemaphoreGive(algoSemaphore);
-      } while(digitalRead(GPIO_PIN_IRQ) != 0);
-    } else {
-      xSemaphoreTake(algoSemaphore, portMAX_DELAY);
-      timeout = algorithm->onEvent(dwm, eventTimeout);
-      xSemaphoreGive(algoSemaphore);
-    }
+    // handleModeSwitch();
+    dwHandleInterrupt(dwm);
+  //   if (xSemaphoreTake(irqSemaphore, timeout / portTICK_PERIOD_MS)) {
+  //     do{
+  //       xSemaphoreTake(algoSemaphore, portMAX_DELAY);
+  //       dwHandleInterrupt(dwm);
+  //       xSemaphoreGive(algoSemaphore);
+  //     } while(digitalRead(GPIO_PIN_IRQ) != 0);
+  //   } else {
+  //     xSemaphoreTake(algoSemaphore, portMAX_DELAY);
+  //     timeout = algorithm->onEvent(dwm, eventTimeout);
+  //     xSemaphoreGive(algoSemaphore);
+  //   }
   }
 }
+
+/**************************************/
+/**************************************/
+/**************************************/
 
 static lpsLppShortPacket_t lppShortPacket;
 
-bool lpsSendLppShort(uint8_t destId, void* data, size_t length)
-{
-  bool result = false;
+// bool lpsSendLppShort(uint8_t destId, void* data, size_t length)
+// {
+//   bool result = false;
 
-  if (isInit)
-  {
-    lppShortPacket.dest = destId;
-    lppShortPacket.length = length;
-    memcpy(lppShortPacket.data, data, length);
-    result = xQueueSend(lppShortQueue, &lppShortPacket,0) == pdPASS;
-  }
+//   if (isInit)
+//   {
+//     lppShortPacket.dest = destId;
+//     lppShortPacket.length = length;
+//     memcpy(lppShortPacket.data, data, length);
+//     result = xQueueSend(lppShortQueue, &lppShortPacket,0) == pdPASS;
+//   }
 
-  return result;
-}
+//   return !result;
+// }
 
-bool lpsGetLppShort(lpsLppShortPacket_t* shortPacket)
-{
-  return xQueueReceive(lppShortQueue, shortPacket, 0) == pdPASS;
-}
+// bool lpsGetLppShort(lpsLppShortPacket_t* shortPacket)
+// {
+//   return xQueueReceive(lppShortQueue, shortPacket, 0) == pdPASS;
+// }
 
 static uint8_t spiTxBuffer[196];
 static uint8_t spiRxBuffer[196];
-static uint16_t spiSpeed = SPI_BAUDRATE_2MHZ;
+static uint16_t spiSpeed = 20000000L;
 
 /************ Low level ops for libdw **********/
 
@@ -321,43 +293,43 @@ static uint16_t spiSpeed = SPI_BAUDRATE_2MHZ;
 static void spiWrite(dwDevice_t* dev, const void *header, size_t headerLength,
                                       const void* data, size_t dataLength)
 {
-  spiBeginTransaction(SPISettings(spiSpeed, MSBFIRST, SPI_MODE0));
+  SPI.spiBeginTransaction(SPISettings(spiSpeed, MSBFIRST, SPI_MODE0));
   digitalWrite(CS_PIN, LOW);
 
   memcpy(spiTxBuffer, header, headerLength);
-  memcpy(spiTxBuffer+headerLength, data, dataLength);
+  memcpy(spiTxBuffer + headerLength, data, dataLength);
 
-  for (int i = 0; i< headerLength+dataLength, i++){
-    SPI.transfer(spiTxBuffer[i])
+  for (int i = 0; i < headerLength + dataLength; i++){
+    SPI.transfer(spiTxBuffer[i]);
   }
 
   delayMicroseconds(5);
   digitalWrite(CS_PIN, HIGH);
-  spiEndTransaction();
+  SPI.spiEndTransaction();
 }
 
 static void spiRead(dwDevice_t* dev, const void *header, size_t headerLength,
                                      void* data, size_t dataLength)
 {
-  spiBeginTransaction(SPISettings(spiSpeed, MSBFIRST, SPI_MODE0));
+  SPI.spiBeginTransaction(SPISettings(spiSpeed, MSBFIRST, SPI_MODE0));
   digitalWrite(CS_PIN, LOW);
 
   memcpy(spiTxBuffer, header, headerLength);
   memset(spiTxBuffer+headerLength, 0, dataLength);
 
-  for (int i = 0; i< headerLength, i++){
-    SPI.transfer(spiTxBuffer[i])
+  for (int i = 0; i< headerLength; i++){
+    SPI.transfer(spiTxBuffer[i]);
   }
 
-  for (int i = 0; i< dataLength, i++){
-    spiRxBuffer[i] = SPI.transfer(0x00)
+  for (int i = 0; i< dataLength; i++){
+    spiRxBuffer[i] = SPI.transfer(0x00);
   }
 
   memcpy(data, spiRxBuffer, dataLength);
 
   delayMicroseconds(5);
   digitalWrite(CS_PIN, HIGH);
-  spiEndTransaction();
+  SPI.spiEndTransaction();
 }
 
 static void spiSetSpeed(dwDevice_t* dev, dwSpiSpeed_t speed)
@@ -385,11 +357,9 @@ static dwOps_t dwOps = {
 };
 
 /*********** Deck driver initialization ***************/
-
-static void dwm1000Init(DeckInfo *info)
-{
-  spiBegin();
-
+//static void dwm1000Init() {
+void dwm1000Init() {
+  SPI.begin();
   // Init IRQ input, Reset output, CS pin output
   pinMode(GPIO_PIN_IRQ, INPUT);
   pinMode(GPIO_PIN_RESET, OUTPUT);
@@ -407,11 +377,8 @@ static void dwm1000Init(DeckInfo *info)
   int result = dwConfigure(dwm);
   if (result != 0) {
     isInit = false;
-    DEBUG_PRINT("Failed to configure DW1000!\r\n");
     return;
   }
-
-  dwEnableAllLeds(dwm);
 
   dwTime_t delay = {.full = 0};
   dwSetAntenaDelay(dwm, delay);
@@ -423,25 +390,19 @@ static void dwm1000Init(DeckInfo *info)
   dwNewConfiguration(dwm);
   dwSetDefaults(dwm);
 
-
-  #ifdef LPS_LONGER_RANGE
   dwEnableMode(dwm, MODE_SHORTDATA_MID_ACCURACY);
-  #else
-  dwEnableMode(dwm, MODE_SHORTDATA_FAST_ACCURACY);
-  #endif
+  //dwEnableMode(dwm, MODE_SHORTDATA_FAST_ACCURACY);
 
   dwSetChannel(dwm, CHANNEL_2);
   dwUseSmartPower(dwm, true);
   dwSetPreambleCode(dwm, PREAMBLE_CODE_64MHZ_9);
 
   dwSetReceiveWaitTimeout(dwm, DEFAULT_RX_TIMEOUT);
-
   dwCommitConfiguration(dwm);
-
-  attachInterrupt(digitalPinToInterrupt(_irq), uwbTask, RISING);
-
+  
+  attachInterrupt(digitalPinToInterrupt(GPIO_PIN_IRQ), uwbTask, RISING);
+  
   isInit = true;
-
 }
 
 uint16_t locoDeckGetRangingState() {
@@ -453,11 +414,11 @@ void locoDeckSetRangingState(const uint16_t newState) {
 }
 
 
-static bool dwm1000Test()
-{
-  if (!isInit) {
-    DEBUG_PRINT("Error while initializing DWM1000\n");
-  }
+// static bool dwm1000Test()
+// {
+//   if (!isInit) {
+//     DEBUG_PRINT("Error while initializing DWM1000\n");
+//   }
 
-  return isInit;
-}
+//   return isInit;
+// }
